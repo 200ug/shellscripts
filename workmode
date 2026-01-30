@@ -4,21 +4,21 @@ err=0
 output_msg=""
 tmux_status=""
 
+domains=("www.youtube.com" "youtube.com" "www.twitch.tv" "gql.twitch.tv" "x.com")
+
 case "$1" in
     on)
-        sudo hostess add www.youtube.com 127.0.0.1 2>/dev/null || err=1
-        sudo hostess add youtube.com 127.0.0.1 2>/dev/null || err=1
-        sudo hostess add www.twitch.tv 127.0.0.1 2>/dev/null || err=1
-        sudo hostess add gql.twitch.tv 127.0.0.1 2>/dev/null || err=1
+        for dom in "${domains[@]}"; do
+            sudo hostess add "$dom" 127.0.0.1 2>/dev/null || err=1
+        done
 
         tmux_status="WORK"
         output_msg="work mode enabled"
         ;;
     off)
-        sudo hostess rm www.youtube.com 2>/dev/null || err=1
-        sudo hostess rm youtube.com 2>/dev/null || err=1
-        sudo hostess rm www.twitch.tv 2>/dev/null || err=1
-        sudo hostess rm gql.twitch.tv 2>/dev/null || err=1
+        for dom in "${domains[@]}"; do
+            sudo hostess rm "$dom" 2>/dev/null || err=1
+        done
 
         tmux_status="LAZY"
         output_msg="work mode disabled"
