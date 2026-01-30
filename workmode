@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+err=0
+output_msg=""
+tmux_status=""
+
+case "$1" in
+    on)
+        sudo hostess add www.youtube.com 127.0.0.1 2>/dev/null || err=1
+        sudo hostess add youtube.com 127.0.0.1 2>/dev/null || err=1
+        sudo hostess add www.twitch.tv 127.0.0.1 2>/dev/null || err=1
+        sudo hostess add gql.twitch.tv 127.0.0.1 2>/dev/null || err=1
+
+        tmux_status="WORK"
+        output_msg="work mode enabled"
+        ;;
+    off)
+        sudo hostess rm www.youtube.com 2>/dev/null || err=1
+        sudo hostess rm youtube.com 2>/dev/null || err=1
+        sudo hostess rm www.twitch.tv 2>/dev/null || err=1
+        sudo hostess rm gql.twitch.tv 2>/dev/null || err=1
+
+        tmux_status="LAZY"
+        output_msg="work mode disabled"
+        ;;
+    *)
+        echo "[?] usage: workmode [on|off]"
+        exit 1
+        ;;
+esac
+
+if [ $err -eq 0 ]; then
+    tmux set -g status-left " $tmux_status "
+    echo "[+] $output_msg"
+else 
+    echo "[!] failed changing work mode"
+    exit 1
+fi
+

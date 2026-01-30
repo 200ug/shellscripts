@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+# https://bgp.tools/kb/api
+
+whois -h bgp.tools " -v $*"
+

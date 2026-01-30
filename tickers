@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+if [ "$#" -lt 1 ]; then
+    echo "[?] usage: $0 [command]"
+    echo "[?] commands: period <p>, rate <n>, less"
+fi
+
+ticker="$1"
+
+if [ "$#" -eq 1 ]; then
+    curl -s "https://rate.sx/$ticker"
+else
+    case "$2" in
+        period*)
+            # display rate for period $3
+            curl -s "https://rate.sx/$ticker@$3"
+            ;;
+        rate*)
+            # convert $3 crypto to usd
+            curl -s "https://rate.sx/$3$ticker"
+            ;;
+        less*)
+            # grep today's low, high, and avg
+            curl -s "https://rate.sx/$ticker?T" | grep "^[abh]"
+            ;;
+    esac
+fi
+

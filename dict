@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+curl --silent "dict.org/d:$1" | less
+
