@@ -95,11 +95,8 @@ cmd_status() {
     local local_name
     local_name=$(get_local_basedir)
 
-    echo "--- push: local -> remote ---"
-    rsync -avzn --delete "${exclude_args[@]}" --itemize-changes -e "ssh -p $port $SSH_OPTS" ./ "$user_host:$remote_dir/$local_name/" 2>/dev/null || true
-    echo ""
-    echo "--- pull: local <- remote ---"
-    rsync -avzn --delete "${exclude_args[@]}" --itemize-changes -e "ssh -p $port $SSH_OPTS" "$user_host:$remote_dir/$local_name/" ./ 2>/dev/null || true
+    # it's enough to check either remote->local or local->remote as they'll likely just contain the same stuff in our use case
+    rsync -avznc --delete "${exclude_args[@]}" --itemize-changes -e "ssh -p $port $SSH_OPTS" ./ "$user_host:$remote_dir/$local_name/" 2>/dev/null || true
 }
 
 [[ "$#" -ge 1 ]] || usage
