@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-if [ "$#" -lt 1 ]; then
+if [[ "$#" -lt 1 ]]; then
     echo "[?] usage: $0 [command]"
     echo "[?] commands: period <p>, rate <n>, less"
 fi

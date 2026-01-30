@@ -29,7 +29,7 @@ case "$1" in
         ;;
 esac
 
-if [ $err -eq 0 ]; then
+if [[ $err -eq 0 ]]; then
     tmux set -g status-left " $tmux_status "
     echo "[+] $output_msg"
 else 

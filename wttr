@@ -4,7 +4,7 @@
 
 OPTS="?2q"
 
-if [ "$#" -ne 1 ]; then
+if [[ "$#" -ne 1 ]]; then
     curl -s "wttr.in/hel$OPTS" # iata code default
 else
     # preferably use iata codes instead of raw location names
