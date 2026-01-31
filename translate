@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+# mozhi api docs: https://mozhi.bloat.cat/api/swagger/index.html
+# list of instances: https://codeberg.org/aryak/mozhi#instances
+
+set -e
+
+INSTANCE="https://translate.privacyredirect.com"
+ENGINE="duckduckgo" # all, deepl, duckduckgo, google, mymemory, reverso, some, yandex
+
+# note: the response delay is drastically affected by the choice of a translation engine
+
+if [[ $# -lt 2 ]]; then
+    echo "[?] usage: $0 <from>2<to> '<text>'"
+    echo "[?] e.g. $0 auto2en 'привет'"
+    exit 1
+fi
+
+lang_pairs="$1"
+shift
+text="$*"
+
+if [[ ! "$lang_pairs" =~ ^([a-z]{2,4})2([a-z]{2,3})$ ]]; then
+    echo "[!] error: invalid language pair format, use format like 'auto2fi' or 'en2ru'"
+    exit 1
+fi
+
+from="${BASH_REMATCH[1]}"
+to="${BASH_REMATCH[2]}"
+
+response=$(curl -s -G "$INSTANCE/api/translate" \
+    --data-urlencode "engine=$ENGINE" \
+    --data-urlencode "from=$from" \
+    --data-urlencode "to=$to" \
+    --data-urlencode "text=$text" \
+)
+
+echo "$response" | jq -r '.["translated-text"]'
+
