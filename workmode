@@ -4,7 +4,7 @@ err=0
 output_msg=""
 tmux_status=""
 
-domains=("www.youtube.com" "youtube.com" "www.twitch.tv" "gql.twitch.tv" "x.com")
+domains=("www.youtube.com" "youtube.com" "www.twitch.tv" "gql.twitch.tv" "x.com" "areena.yle.fi")
 
 case "$1" in
     on)
