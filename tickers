@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
-if [[ "$#" -lt 1 ]]; then
+if [[ "$#" -lt 1 || "$1" == "help" || "$1" == "usage" ]]; then
     echo "[?] usage: $0 [command]"
     echo "[?] commands: period <p>, rate <n>, less"
+    exit 1
 fi
 
 ticker="$1"
