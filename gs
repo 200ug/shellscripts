@@ -14,7 +14,7 @@ usage() {
     init <user@host:port:remote_dir>    init config with remote settings
     push                                push local files to remote
     pull                                pull remote files to local
-    status                              show what would be transferred
+    st                                  show what would be transferred
 
 EOF
     exit 1
@@ -105,7 +105,7 @@ case "$1" in
     init)   shift; cmd_init "$@" ;;
     push)   cmd_push ;;
     pull)   cmd_pull ;;
-    status) cmd_status ;;
+    st)     cmd_status ;;
     *)      usage ;;
 esac
 
