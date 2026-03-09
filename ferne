@@ -5,7 +5,7 @@
 #   github      200ug   git@github.com:200ug/{repo}.git
 #   forgejo     2ug     ssh://git@codeberg.org/2ug/{repo}.git
 #   
-# example tokens file (before encryption):
+# tokens file format (raw, i.e. before encryption):
 #   GITHUB_TOKEN <gh_token>
 #   FORGEJO_TOKEN <fj_token>
 
@@ -171,7 +171,7 @@ require_cmd git
 require_cmd jq
 require_cmd curl
 
-# todo: add a failsafe that asks "are you sure" if we're about to overwrite an existing repository with >0 commits logged (as this script is designed to only be run when initializing completely new repos!)
+# todo: maybe add a fail-safe that prevents overwriting repos with >0 commits?
 
 case "$1" in
     init) export_tokens && repo_init ;;
