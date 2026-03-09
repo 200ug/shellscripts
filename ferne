@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+
+# mirrors format: "<platform> <username> <ssh_template>"
+# example mirrors config:
+#   github      200ug   git@github.com:200ug/{repo}.git
+#   forgejo     2ug     ssh://git@codeberg.org/2ug/{repo}.git
+#   
+# example tokens file (before encryption):
+#   GITHUB_TOKEN <gh_token>
+#   FORGEJO_TOKEN <fj_token>
+
+set -euo pipefail
+
+MIRRORS_CFG="$HOME/.config/ferne/mirrors"
+# gpg --encrypt --recipient 1530F5132A1228578D2B4168995EFD5C1B532B3E tokens && shred -u tokens
+TOKENS_ENV="$HOME/.config/ferne/tokens.gpg"
+LOCAL_MIRRORS_OVERRIDE=".ferne_or"
+
+GITHUB_API_BASE="https://api.github.com"
+FORGEJO_API_BASE="https://codeberg.org/api/v1"
+# todo: add cgit support later
+
+die() { echo "[!] error: $*" >&2; exit 1; }
+
+require_cmd() {
+    command -v "$1" &>/dev/null || die "'$1' required but not found in PATH"
+}
+
+export_tokens() {
+    if [[ ! -f "$TOKENS_ENV" ]]; then
+        die "no tokens file found at $TOKENS_ENV"
+    fi
+
+    # gpg-agent caches auth, so we only need to manually auth once over a single session
+    _decrypted=$(gpg --quiet --decrypt "$TOKENS_ENV" 2>/dev/null) || die "failed to decrypt $TOKENS_ENV"
+
+    while IFS= read -r _line; do
+        [[ -z "$_line" || "$_line" =~ ^[[:space:]]*# ]] && continue
+        parts=(${_line// / })
+        # prevent accidental overwrites
+        if [[ -z "${!parts[0]:-}" ]]; then
+            # echo "key: '${parts[0]}', value: '${parts[1]}'"
+            export "${parts[0]}=${parts[1]}"
+        else
+            die "environment variable '${parts[0]}' has already been set, aborting instead of overwriting"
+        fi
+    done <<< "$_decrypted"
+
+    unset _decrypted
+}
+
+repo_exists() {
+    local platform="$1" username="$2"
+    local url status token
+
+    case "$platform" in
+        github)
+            token="$GITHUB_TOKEN"
+            url="$GITHUB_API_BASE/repos/$username/$repo_name"
+            ;;
+        forgejo)
+            token="$FORGEJO_TOKEN"
+            url="$FORGEJO_API_BASE/repos/$username/$repo_name"
+            ;;
+    esac
+
+    status=$(curl -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: Bearer $token" \
+        "$url")
+
+    [[ "$status" == "200" ]]
+}
+
+create_repo() {
+    local platform="$1" username="$2"
+    local url token payload response http_status_code
+
+    local private_str_var="false"
+    $private && private_str_var="true"
+
+    case "$platform" in
+        github)
+            token="$GITHUB_TOKEN"
+            url="$GITHUB_API_BASE/user/repos"
+            payload=$(jq -n \
+                --arg name "$repo_name" \
+                --arg desc "$DESCRIPTION" \
+                --argjson private "$private_str_var" \
+                '{name: $name, description: $desc, private: $private, auto_init: false}')
+            ;;
+        forgejo)
+            token="$FORGEJO_TOKEN"
+            url="$FORGEJO_API_BASE/user/repos"
+            payload=$(jq -n \
+                --arg name "$repo_name" \
+                --arg desc "$DESCRIPTION" \
+                --argjson private "$private_str_var" \
+                '{name: $name, description: $desc, private: $private, auto_init: false}')
+            ;;
+    esac
+
+    if repo_exists "$platform" "$username"; then
+        echo "[+] repository $repo_name already exists on $platform, skipping creation"
+        return
+    fi
+
+    printf "[~] creating new repository $repo_name on $platform... "
+
+    response=$(curl -s -w "\n%{http_status_code}" \
+        -X POST \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json" \
+        -d "$payload" \
+        "$url")
+
+    http_status_code=$(echo "$response" | tail -1)
+    local body
+    body=$(echo "$response" | sed '$d')
+
+    case "$http_status_code" in
+        201)
+            printf "success!\n"
+            ;;
+        *)
+            printf "failed\n"
+            echo "$body" | jq -r '.message // .' 2>/dev/null >&2 || echo "$body" >&2
+            die "api comms failed with unexpected http status $http_status_code"
+            ;;
+    esac
+}
+
+repo_init() {
+    [[ -f "$MIRRORS_CFG" ]] || die "no mirrors config found at $MIRRORS_CFG"
+
+    local existing_push_urls
+    existing_push_urls=$(git remote get-url --push --all origin 2>/dev/null) || true
+    for _url in $existing_push_urls; do
+        git config --unset-all remote.origin.pushurl 2>/dev/null || true
+        break # --unset-all requires only one run
+    done
+
+    while IFS= read -r line; do
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue # skip blanks & comments
+        read -r platform username ssh_template <<< "$line"
+
+        local ssh_url="${ssh_template//\{repo\}/$repo_name}"
+        create_repo "$platform" "$username" # skips if one already exists (bravely assuming no naming conflicts)
+        git remote set-url --add --push origin "$ssh_url"
+        echo "[+] new remote push url: $ssh_url"
+    done < "$MIRRORS_CFG"
+}
+
+usage() {
+    echo "[?] usage: $0 [init|private|help]"
+    echo "      init        create new mirrored (public) repository"
+    echo "      private     create new mirrored (private) repository"
+    echo "      help        print this menu"
+}
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository"
+repo_name="$(basename "$repo_root")"
+current_branch="$(git symbolic-ref --short HEAD 2>/dev/null)" || die "could not read branch name"
+private=false
+
+# lazy design, but prevents accidentally overwriting stuff
+[[ $# -ne 1 ]] && die "one argument required, see help for more details"
+
+require_cmd gpg
+require_cmd git
+require_cmd jq
+require_cmd curl
+
+# todo: add a failsafe that asks "are you sure" if we're about to overwrite an existing repository with >0 commits logged (as this script is designed to only be run when initializing completely new repos!)
+
+case "$1" in
+    init) export_tokens && repo_init ;;
+    private) private=true; export_tokens && repo_init ;;
+    help|-h) usage; exit 0 ;;
+    *) die "unknown option '$1'" ;;
+esac
+
