@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 # mirrors format: "<platform> <username> <ssh_template>"
-# example mirrors config:
-#   github      200ug   git@github.com:200ug/{repo}.git
+# example mirrors config (note that order matters here: the first one will be the primary origin):
 #   forgejo     2ug     ssh://git@codeberg.org/2ug/{repo}.git
+#   github      200ug   git@github.com:200ug/{repo}.git
 #   
 # tokens file format (raw, i.e. before encryption):
 #   GITHUB_TOKEN <gh_token>
@@ -11,6 +11,7 @@
 
 set -euo pipefail
 
+DESCRIPTION="Repository created via the ferne mirroring system"
 MIRRORS_CFG="$HOME/.config/ferne/mirrors"
 # gpg --encrypt --recipient 1530F5132A1228578D2B4168995EFD5C1B532B3E tokens && shred -u tokens
 TOKENS_ENV="$HOME/.config/ferne/tokens.gpg"
@@ -106,7 +107,7 @@ create_repo() {
 
     printf "[~] creating new repository $repo_name on $platform... "
 
-    response=$(curl -s -w "\n%{http_status_code}" \
+    response=$(curl -s -w "\n%{http_code}" \
         -X POST \
         -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
@@ -115,8 +116,6 @@ create_repo() {
         "$url")
 
     http_status_code=$(echo "$response" | tail -1)
-    local body
-    body=$(echo "$response" | sed '$d')
 
     case "$http_status_code" in
         201)
@@ -124,7 +123,6 @@ create_repo() {
             ;;
         *)
             printf "failed\n"
-            echo "$body" | jq -r '.message // .' 2>/dev/null >&2 || echo "$body" >&2
             die "api comms failed with unexpected http status $http_status_code"
             ;;
     esac
@@ -133,12 +131,18 @@ create_repo() {
 repo_init() {
     [[ -f "$MIRRORS_CFG" ]] || die "no mirrors config found at $MIRRORS_CFG"
 
-    local existing_push_urls
-    existing_push_urls=$(git remote get-url --push --all origin 2>/dev/null) || true
-    for _url in $existing_push_urls; do
-        git config --unset-all remote.origin.pushurl 2>/dev/null || true
-        break # --unset-all requires only one run
-    done
+    if ! git remote get-url origin &>/dev/null; then
+        local first_url
+        first_url=$(grep -v '^\s*#' "$MIRRORS_CFG" | grep -v '^\s*$' | head -1 | {
+            read -r _platform _username _ssh_template
+            echo "${_ssh_template//\{repo\}/$repo_name}"
+        })
+        git remote add origin "$first_url"
+        echo "[+] created origin remote: $first_url"
+    fi
+
+    # clear existing push urls so we rebuild from scratch
+    git config --unset-all remote.origin.pushurl 2>/dev/null || true
 
     while IFS= read -r line; do
         [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue # skip blanks & comments
@@ -170,8 +174,6 @@ require_cmd gpg
 require_cmd git
 require_cmd jq
 require_cmd curl
-
-# todo: maybe add a fail-safe that prevents overwriting repos with >0 commits?
 
 case "$1" in
     init) export_tokens && repo_init ;;
