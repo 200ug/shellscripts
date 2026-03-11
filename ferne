@@ -50,6 +50,20 @@ export_tokens() {
     unset _decrypted
 }
 
+parse_mirrors() {
+    [[ -f "$MIRRORS_CFG" ]] || die "no mirrors config found at $MIRRORS_CFG"
+
+    while IFS= read -r line; do
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue # skip blanks & comments
+        read -r platform username ssh_template <<< "$line"
+        mirror_platforms+=("$platform")
+        mirror_users+=("$username")
+        mirror_urls+=("${ssh_template//\{repo\}/$repo_name}")
+    done < "$MIRRORS_CFG"
+
+    [[ ${#mirror_platforms[@]} -gt 0 ]] || die "no mirrors defined in $MIRRORS_CFG"
+}
+
 repo_exists() {
     local platform="$1" username="$2"
     local url status token
@@ -129,30 +143,39 @@ create_repo() {
 }
 
 repo_init() {
-    [[ -f "$MIRRORS_CFG" ]] || die "no mirrors config found at $MIRRORS_CFG"
+    parse_mirrors
 
     if ! git remote get-url origin &>/dev/null; then
-        local first_url
-        first_url=$(grep -v '^\s*#' "$MIRRORS_CFG" | grep -v '^\s*$' | head -1 | {
-            read -r _platform _username _ssh_template
-            echo "${_ssh_template//\{repo\}/$repo_name}"
-        })
-        git remote add origin "$first_url"
-        echo "[+] created origin remote: $first_url"
+        git remote add origin "${mirror_urls[0]}"
+        echo "[+] created origin remote: ${mirror_urls[0]}"
     fi
 
     # clear existing push urls so we rebuild from scratch
     git config --unset-all remote.origin.pushurl 2>/dev/null || true
 
-    while IFS= read -r line; do
-        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue # skip blanks & comments
-        read -r platform username ssh_template <<< "$line"
+    for i in "${!mirror_platforms[@]}"; do
+        create_repo "${mirror_platforms[$i]}" "${mirror_users[$i]}" # skips if one already exists (bravely assuming no naming conflicts)
+        git remote set-url --add --push origin "${mirror_urls[$i]}"
+        echo "[+] new remote push url: ${mirror_urls[$i]}"
+    done
+}
 
-        local ssh_url="${ssh_template//\{repo\}/$repo_name}"
-        create_repo "$platform" "$username" # skips if one already exists (bravely assuming no naming conflicts)
-        git remote set-url --add --push origin "$ssh_url"
-        echo "[+] new remote push url: $ssh_url"
-    done < "$MIRRORS_CFG"
+readme_init() {
+    local links=""
+
+    for i in "${!mirror_platforms[@]}"; do
+        local label username="${mirror_users[$i]}"
+
+        case "${mirror_platforms[$i]}" in
+            github)  label="[Github](https://github.com/$username/$repo_name)" ;;
+            forgejo) label="[Codeberg](https://codeberg.org/$username/$repo_name)" ;;
+        esac
+
+        [[ -n "$links" ]] && links="$links / "
+        links="$links$label"
+    done
+
+    echo -e "---\n\n###### Mirrors: $links" > README.md
 }
 
 usage() {
@@ -165,6 +188,11 @@ usage() {
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository"
 repo_name="$(basename "$repo_root")"
 current_branch="$(git symbolic-ref --short HEAD 2>/dev/null)" || die "could not read branch name"
+
+mirror_platforms=()
+mirror_users=()
+mirror_urls=()
+
 private=false
 
 # lazy design, but prevents accidentally overwriting stuff
@@ -176,8 +204,8 @@ require_cmd jq
 require_cmd curl
 
 case "$1" in
-    init) export_tokens && repo_init ;;
-    private) private=true; export_tokens && repo_init ;;
+    init) export_tokens && repo_init && readme_init ;;
+    private) private=true; export_tokens && repo_init && readme_init ;;
     help|-h) usage; exit 0 ;;
     *) die "unknown option '$1'" ;;
 esac
