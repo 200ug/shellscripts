@@ -178,11 +178,73 @@ readme_init() {
     echo -e "---\n\n###### Mirrors: $links" > README.md
 }
 
+rename_repo() {
+    local platform="$1" username="$2" new_name="$3"
+    local url token payload response http_status_code
+
+    case "$platform" in
+        github)
+            token="$GITHUB_TOKEN"
+            url="$GITHUB_API_BASE/repos/$username/$repo_name"
+            ;;
+        forgejo)
+            token="$FORGEJO_TOKEN"
+            url="$FORGEJO_API_BASE/repos/$username/$repo_name"
+            ;;
+    esac
+
+    payload=$(jq -n --arg name "$new_name" '{name: $name}')
+
+    printf "[~] renaming $repo_name -> $new_name on $platform... "
+
+    response=$(curl -s -w "\n%{http_code}" \
+        -X PATCH \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json" \
+        -d "$payload" \
+        "$url")
+
+    http_status_code=$(echo "$response" | tail -1)
+
+    case "$http_status_code" in
+        200)
+            printf "success!\n"
+            ;;
+        *)
+            printf "failed\n"
+            die "api comms failed with unexpected http status $http_status_code"
+            ;;
+    esac
+}
+
+rename_handler() {
+    local new_name="$1"
+    parse_mirrors
+
+    for i in "${!mirror_platforms[@]}"; do
+        rename_repo "${mirror_platforms[$i]}" "${mirror_users[$i]}" "$new_name"
+    done
+
+    # rebuild remote urls with new name
+    git config --unset-all remote.origin.pushurl 2>/dev/null || true
+
+    git remote set-url origin "${mirror_urls[0]//$repo_name/$new_name}"
+    echo "[+] updated origin: ${mirror_urls[0]//$repo_name/$new_name}"
+
+    for i in "${!mirror_urls[@]}"; do
+        local new_url="${mirror_urls[$i]//$repo_name/$new_name}"
+        git remote set-url --add --push origin "$new_url"
+        echo "[+] updated push url: $new_url"
+    done
+}
+
 usage() {
     echo "[?] usage: $0 [init|private|help]"
-    echo "      init        create new mirrored (public) repository"
-    echo "      private     create new mirrored (private) repository"
-    echo "      help        print this menu"
+    echo "      init            create new mirrored (public) repository"
+    echo "      private         create new mirrored (private) repository"
+    echo "      rename <name>   rename the (existing) mirrors"
+    echo "      help            print this menu"
 }
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository"
@@ -195,8 +257,7 @@ mirror_urls=()
 
 private=false
 
-# lazy design, but prevents accidentally overwriting stuff
-[[ $# -ne 1 ]] && die "one argument required, see help for more details"
+[[ $# -eq 0 || $# -gt 2 ]] && die "invalid arguments, see help for more details"
 
 require_cmd gpg
 require_cmd git
@@ -206,6 +267,7 @@ require_cmd curl
 case "$1" in
     init) export_tokens && repo_init && readme_init ;;
     private) private=true; export_tokens && repo_init && readme_init ;;
+    rename) [[ $# -ne 2 ]] && die "'rename' requires a new name argument"; export_tokens && rename_handler "$2" ;;
     help|-h) usage; exit 0 ;;
     *) die "unknown option '$1'" ;;
 esac
