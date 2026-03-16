@@ -15,7 +15,6 @@ DESCRIPTION="Repository created via the ferne mirroring system"
 MIRRORS_CFG="$HOME/.config/ferne/mirrors"
 # gpg --encrypt --recipient 1530F5132A1228578D2B4168995EFD5C1B532B3E tokens && shred -u tokens
 TOKENS_ENV="$HOME/.config/ferne/tokens.gpg"
-LOCAL_MIRRORS_OVERRIDE=".ferne_or"
 
 GITHUB_API_BASE="https://api.github.com"
 FORGEJO_API_BASE="https://codeberg.org/api/v1"
