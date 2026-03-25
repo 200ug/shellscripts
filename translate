@@ -5,7 +5,7 @@
 
 set -e
 
-INSTANCE="https://translate.privacyredirect.com"
+INSTANCE="https://mozhi.pussthecat.org"
 ENGINE="duckduckgo" # all, deepl, duckduckgo, google, mymemory, reverso, some, yandex
 
 # note: the response delay is drastically affected by the choice of a translation engine
