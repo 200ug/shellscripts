@@ -4,7 +4,6 @@
 set -euo pipefail
 
 CONFIG="$HOME/.config/gs.conf"
-META=".gs.meta"
 SSH_OPTS="-o PasswordAuthentication=no -o BatchMode=yes" # never prompt for password
 
 usage() {
@@ -12,10 +11,10 @@ usage() {
 [?] usage: $0 <cmd> [args]
 
 [?] commands:
-    init <user@host:port:remote_dir> <gpg_key>   init config with remote and gpg key
-    push                                         push local changes to remote (encrypted)
-    pull                                         pull remote changes to local (decrypted)
-    st                                           show pending changes
+    init <user@host:port:remote_dir>    init config with remote settings
+    push                                push local files to remote
+    pull                                pull remote files to local
+    st                                  show what would be transferred
 
 EOF
     exit 1
@@ -35,173 +34,69 @@ validate_remote() {
 }
 
 cmd_init() {
-    [[ "$#" -eq 2 ]] || die "usage: $0 init <user@host:port:remote_dir> <gpg_key>"
+    [[ "$#" -eq 1 ]] || die "usage: $0 init <user@host:port:remote_dir>"
 
+    local remote="$1"
     validate_remote "$1"
-    mkdir -p "$(dirname "$CONFIG")"
+
+    mkdir -p $(dirname "$CONFIG")
     cat > "$CONFIG" <<EOF
-$1
-$2
-# exclude patterns
+$remote
+# exclude patterns (one per line)
 .DS_Store
 *.tmp
 *.swp
 .git
 node_modules
 EOF
-
     echo "[+] initialized $CONFIG"
 }
 
 parse_config() {
-    [[ -f "$CONFIG" ]] || die "not initialized, run: $0 init <remote> <gpg_key>"
+    [[ -f "$CONFIG" ]] || die "not initialized, run: $0 init <remote>"
 
-    local _remote
-    { IFS= read -r _remote; IFS= read -r gpg_key; } < "$CONFIG"
-    user_host="${_remote%%:*}"
-    local _rest="${_remote#*:}"
-    port="${_rest%%:*}"
-    remote_dir="${_rest#*:}"
+    local first_line
+    first_line=$(head -n1 "$CONFIG")
+    user_host="${first_line%%:*}"
+    local rest="${first_line#*:}"
+    port="${rest%%:*}"
+    remote_dir="${rest#*:}"
 
-    # build exclude patterns from remaining lines (skip comments and blanks)
-    exclude_patterns=()
+    # build exclude args from remaining lines (skip comments and blanks)
+    exclude_args=()
     while IFS= read -r line; do
         [[ -z "$line" || "$line" =~ ^# ]] && continue
-        exclude_patterns+=("$line")
-    done < <(tail -n +3 "$CONFIG")
+        exclude_args+=(--exclude "$line")
+    done < <(tail -n +2 "$CONFIG")
 }
 
 get_local_basedir() {
     basename "$(pwd)"
 }
 
-# list all non-excluded local files as "path<tab>mtime", sorted
-list_local_files() {
-    local args=(-type f -not -name "$META")
-
-    for p in "${exclude_patterns[@]}"; do
-        args+=(-not -name "$p" -not -path "*/$p/*")
-    done
-
-    find . "${args[@]}" | sort | while IFS= read -r f; do
-        printf "%s\t%s\n" "${f#./}" "$(date -r "$f" +%s)"
-    done
-}
-
-# return a file's mtime from a meta file, or 0 if absent
-lookup_mtime() {
-    local path="$1" meta="$2"
-
-    [[ -f "$meta" ]] || { echo 0; return; }
-    local v=$(awk -F'\t' -v p="$path" '$1==p{print $2; exit}' "$meta")
-    echo "${v:-0}"
-}
-
 cmd_push() {
     parse_config
+    local local_name
+    local_name=$(get_local_basedir)
 
-    local local_name=$(get_local_basedir)
-    local staging=$(mktemp -d)
-    local tmp=$(mktemp)
-    list_local_files > "$tmp"
-
-    # encrypt all local files into staging; touch -r preserves mtime so rsync skips unchanged
-    while IFS=$'\t' read -r path mtime; do
-        echo "[>] $path"
-        mkdir -p "$staging/$(dirname "$path")"
-        gpg --encrypt --recipient "$gpg_key" --batch --yes --output "$staging/$path.gpg" "$path"
-        touch -r "$path" "$staging/$path.gpg"
-    done < "$tmp"
-
-    cp "$tmp" "$staging/$META"
-    mv "$tmp" "$META"
-    rsync -az --delete -e "ssh -p $port $SSH_OPTS" "$staging/" "$user_host:$remote_dir/$local_name/"
-    rm -rf "$staging"
-
-    echo "[+] done"
+    rsync -avz --delete "${exclude_args[@]}" -e "ssh -p $port $SSH_OPTS" ./ "$user_host:$remote_dir/$local_name/"
 }
 
 cmd_pull() {
     parse_config
+    local local_name
+    local_name=$(get_local_basedir)
 
-    local local_name=$(get_local_basedir)
-    local remote_path="$remote_dir/$local_name"
-    local tmp=$(mktemp)
-
-    rsync -az -e "ssh -p $port $SSH_OPTS" "$user_host:$remote_path/$META" "$tmp" 2>/dev/null || {
-        echo "[i] nothing to pull"
-        rm -f "$tmp"
-        return
-    }
-
-    # download and decrypt changed/new files
-    local changed=$(mktemp)
-    while IFS=$'\t' read -r path mtime; do
-        local old=$(lookup_mtime "$path" "$META")
-        [[ "$mtime" -gt "$old" ]] && echo "$path.gpg" >> "$changed"
-    done < "$tmp"
-
-    if [[ -s "$changed" ]]; then
-        local staging=$(mktemp -d)
-        rsync -az --files-from="$changed" -e "ssh -p $port $SSH_OPTS" "$user_host:$remote_path/" "$staging/"
-
-        while IFS=$'\t' read -r path mtime; do
-            [[ -f "$staging/$path.gpg" ]] || continue
-            echo "[<] $path"
-            mkdir -p "$(dirname "$path")"
-            gpg --decrypt --batch --yes --output "$path" "$staging/$path.gpg"
-            touch -t "$(date -r "$mtime" +%Y%m%d%H%M.%S)" "$path"
-        done < "$tmp"
-
-        rm -rf "$staging"
-    fi
-    rm -f "$changed"
-
-    # remove files deleted remotely
-    if [[ -f "$META" ]]; then
-        while IFS=$'\t' read -r path _; do
-            grep -qF "$(printf '%s\t' "$path")" "$tmp" || {
-                echo "[-] $path"
-                rm -f "$path"
-            }
-        done < "$META"
-    fi
-
-    mv "$tmp" "$META"
-
-    echo "[+] done"
+    rsync -avz --delete "${exclude_args[@]}" -e "ssh -p $port $SSH_OPTS" "$user_host:$remote_dir/$local_name/" ./ 
 }
 
 cmd_status() {
     parse_config
+    local local_name
+    local_name=$(get_local_basedir)
 
-    local local_name=$(get_local_basedir)
-    local remote_path="$remote_dir/$local_name"
-    local tmp=$(mktemp)
-
-    rsync -az -e "ssh -p $port $SSH_OPTS" "$user_host:$remote_path/$META" "$tmp" 2>/dev/null || {
-        echo "[i] no remote state"
-        rm -f "$tmp"
-        return
-    }
-
-    local curr=$(mktemp)
-    list_local_files > "$curr"
-    local change_count=0
-
-    while IFS=$'\t' read -r path mtime; do
-        local remote_mtime=$(lookup_mtime "$path" "$tmp")
-        [[ "$mtime" -gt "$remote_mtime" ]] && echo "[>>] $path" && ((change_count++))
-    done < "$curr"
-
-    while IFS=$'\t' read -r path mtime; do
-        local local_mtime=$(lookup_mtime "$path" "$curr")
-        [[ "$mtime" -gt "$local_mtime" ]] && echo "[<<] $path" && ((change_count++))
-    done < "$tmp"
-
-    echo "[i] total change count: $change_count"
-
-    rm -f "$tmp" "$curr"
+    # it's enough to check either remote->local or local->remote as they'll likely just contain the same stuff in our use case
+    rsync -avznc --delete "${exclude_args[@]}" --itemize-changes -e "ssh -p $port $SSH_OPTS" ./ "$user_host:$remote_dir/$local_name/" 2>/dev/null || true
 }
 
 [[ "$#" -ge 1 ]] || usage
@@ -213,3 +108,4 @@ case "$1" in
     st)     cmd_status ;;
     *)      usage ;;
 esac
+
