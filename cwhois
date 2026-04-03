@@ -13,7 +13,8 @@ done
 # must shift as we pass $* to whois
 shift $((OPTIND - 1))
 
-output=$(whois -h bgp.tools " -v $*")
+ip=${*:-$(cat)}
+output=$(whois -h bgp.tools " -v $ip")
 echo "$output"
 
 if [[ $browser -eq 1 ]]; then
