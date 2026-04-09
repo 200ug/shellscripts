@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-DESCRIPTION="Repository created via the ferne mirroring system"
+PLACEHOLDER_DESCRIPTION="Repository created via the ferne mirroring system"
 MIRRORS_CFG="$HOME/.config/ferne/mirrors"
 # gpg --encrypt --recipient 1530F5132A1228578D2B4168995EFD5C1B532B3E tokens && shred -u tokens
 TOKENS_ENV="$HOME/.config/ferne/tokens.gpg"
@@ -98,7 +98,7 @@ create_repo() {
             url="$GITHUB_API_BASE/user/repos"
             payload=$(jq -n \
                 --arg name "$repo_name" \
-                --arg desc "$DESCRIPTION" \
+                --arg desc "$PLACEHOLDER_DESCRIPTION" \
                 --argjson private "$private_str_var" \
                 '{name: $name, description: $desc, private: $private, auto_init: false}')
             ;;
@@ -107,7 +107,7 @@ create_repo() {
             url="$FORGEJO_API_BASE/user/repos"
             payload=$(jq -n \
                 --arg name "$repo_name" \
-                --arg desc "$DESCRIPTION" \
+                --arg desc "$PLACEHOLDER_DESCRIPTION" \
                 --argjson private "$private_str_var" \
                 '{name: $name, description: $desc, private: $private, auto_init: false}')
             ;;
