@@ -238,12 +238,62 @@ rename_handler() {
     done
 }
 
+describe_repo() {
+    local platform="$1" username="$2" description="$3"
+    local url token payload response http_status_code
+
+    case "$platform" in
+        github)
+            token="$GITHUB_TOKEN"
+            url="$GITHUB_API_BASE/repos/$username/$repo_name"
+            ;;
+        forgejo)
+            token="$FORGEJO_TOKEN"
+            url="$FORGEJO_API_BASE/repos/$username/$repo_name"
+            ;;
+    esac
+
+    payload=$(jq -n --arg desc "$description" '{description: $desc}')
+
+    printf "[~] updating description on $platform... "
+
+    response=$(curl -s -w "\n%{http_code}" \
+        -X PATCH \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json" \
+        -d "$payload" \
+        "$url")
+
+    http_status_code=$(echo "$response" | tail -1)
+
+    case "$http_status_code" in
+        200)
+            printf "success!\n"
+            ;;
+        *)
+            printf "failed\n"
+            die "api comms failed with unexpected http status $http_status_code"
+            ;;
+    esac
+}
+
+desc_handler() {
+    local description="$1"
+    parse_mirrors
+
+    for i in "${!mirror_platforms[@]}"; do
+        describe_repo "${mirror_platforms[$i]}" "${mirror_users[$i]}" "$description"
+    done
+}
+
 usage() {
     echo "[?] usage: $0 [init|private|help]"
-    echo "      init            create new mirrored (public) repository"
-    echo "      private         create new mirrored (private) repository"
-    echo "      rename <name>   rename the (existing) mirrors"
-    echo "      help            print this menu"
+    echo "      init             create new mirrored (public) repository"
+    echo "      private          create new mirrored (private) repository"
+    echo "      rename <name>    rename the (existing) mirrors"
+    echo "      desc <content>   set description to mirrors"
+    echo "      help             print this menu"
 }
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository"
@@ -267,6 +317,7 @@ case "$1" in
     init) export_tokens && repo_init && readme_init ;;
     private) private=true; export_tokens && repo_init && readme_init ;;
     rename) [[ $# -ne 2 ]] && die "'rename' requires a new name argument"; export_tokens && rename_handler "$2" ;;
+    desc) [[ $# -ne 2 ]] && die "'desc' requires a content argument"; export_tokens && desc_handler "$2" ;;
     help|-h) usage; exit 0 ;;
     *) die "unknown option '$1'" ;;
 esac
